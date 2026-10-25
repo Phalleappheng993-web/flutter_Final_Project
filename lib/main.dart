@@ -1,11 +1,4 @@
 import 'package:flutter/material.dart';
+import 'repair/app.dart';
 
-void main()=>runApp(
-  MaterialApp(
-    home: Scaffold(
-      body: Center(
-        child: ,
-      ),
-    )
-  )
-);
+void main() => runApp(const ImagineAiApp());
