@@ -1,30 +1,57 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import 'package:flutter_application_1/main.dart';
+import 'package:flutter_application_1/repair/app.dart';
+import 'package:flutter_application_1/repair/artwork_store.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  setUp(ArtworkStore.reset);
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+  testWidgets('onboarding shows the first intro', (tester) async {
+    await tester.pumpWidget(const ImagineAiApp());
+    expect(find.text('Describe what you imagine'), findsOneWidget);
+  });
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
+  testWidgets('Skip opens login', (tester) async {
+    await tester.pumpWidget(const ImagineAiApp());
+    await tester.tap(find.text('Skip'));
+    await tester.pumpAndSettle();
+    expect(find.text('Welcome to Imagine AI'), findsOneWidget);
+  });
+
+  testWidgets('login can generate and open the result screen', (tester) async {
+    await tester.pumpWidget(const ImagineAiApp());
+    await tester.tap(find.text('Skip'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byType(TextFormField).at(0),
+      'alex@example.com',
+    );
+    await tester.enterText(find.byType(TextFormField).at(1), 'password123');
+    await tester.ensureVisible(find.text('Continue'));
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byType(TextField).first,
+      'A fox reading in a library',
+    );
+    await tester.scrollUntilVisible(
+      find.text('Generate image'),
+      250,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('Generate image'));
     await tester.pump();
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpAndSettle();
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    expect(find.text('Your image'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('A fox reading in a library'),
+      250,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('A fox reading in a library'), findsOneWidget);
   });
 }

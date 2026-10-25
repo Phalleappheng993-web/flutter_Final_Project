@@ -1,98 +1,620 @@
 import 'package:flutter/material.dart';
-import '../theme_state.dart';
+
+import '../artwork_store.dart';
 import '../models/artwork.dart';
+import '../theme_state.dart';
 import '../widgets/sample_artwork.dart';
 import 'account_pages.dart';
 
-const blue = Color(0xFF315BFF);
-const muted = Color(0xFF85899B);
+const _blue = Color(0xFF315BFF);
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({super.key, this.onLogout});
+
+  final void Function(BuildContext context)? onLogout;
+
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  int tab = 0;
-  String style = 'Realistic';
-  final prompt = TextEditingController();
-  final history = <Artwork>[];
-  Artwork? selected;
-  bool enhance = false;
-  bool busy = false;
-  final styles = const ['Realistic', 'Anime', 'Watercolor', '3D'];
+  final _promptController = TextEditingController();
+  final _styles = const ['Realistic', 'Anime', 'Watercolor', '3D'];
+  int _tab = 0;
+  String _style = 'Realistic';
+  bool _isGenerating = false;
+  bool _showSaved = false;
 
-  void generate() {
-    if (prompt.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please describe your idea first.')));
+  @override
+  void dispose() {
+    _promptController.dispose();
+    super.dispose();
+  }
+
+  Artwork _makeArtwork(String prompt, String style) => Artwork(
+    prompt: prompt,
+    style: style,
+    createdAt: DateTime.now(),
+    seed: DateTime.now().microsecondsSinceEpoch,
+  );
+
+  void _generate() {
+    final idea = _promptController.text.trim();
+    if (idea.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please describe your idea first.')),
+      );
       return;
     }
-    setState(() {
-      busy = true;
-      final idea = prompt.text.trim();
-      selected = Artwork(prompt: enhance ? '$idea, detailed composition, vivid lighting' : idea, style: style, createdAt: DateTime.now(), seed: DateTime.now().millisecondsSinceEpoch);
-      history.insert(0, selected!);
-      tab = 0;
+    _openGenerating(_makeArtwork(idea, _style));
+  }
+
+  void _openGenerating(Artwork artwork) {
+    FocusScope.of(context).unfocus();
+    setState(() => _isGenerating = true);
+    Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => GeneratingPage(
+          artwork: artwork,
+          onGenerated: () => ArtworkStore.addHistory(artwork),
+          onEdit: () => _editArtwork(artwork),
+          onRegenerate: () => _regenerateArtwork(artwork),
+          onDelete: () => _deleteArtwork(artwork),
+        ),
+      ),
+    ).whenComplete(() {
+      if (mounted) setState(() => _isGenerating = false);
     });
-    Navigator.push(context, MaterialPageRoute(builder: (_) => GeneratingPage(artwork: selected!))).then((_) { if (mounted) setState(() => busy = false); });
+  }
+
+  void _openResult(Artwork artwork) {
+    Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ResultScreen(
+          artwork: artwork,
+          onEdit: () => _editArtwork(artwork),
+          onRegenerate: () => _regenerateArtwork(artwork),
+          onDelete: () => _deleteArtwork(artwork),
+        ),
+      ),
+    );
+  }
+
+  void _editArtwork(Artwork artwork) {
+    Navigator.popUntil(context, (route) => route.isFirst);
+    if (!mounted) return;
+    setState(() {
+      _promptController.text = artwork.prompt;
+      _style = artwork.style;
+      _tab = 0;
+    });
+  }
+
+  void _regenerateArtwork(Artwork artwork) {
+    Navigator.popUntil(context, (route) => route.isFirst);
+    if (!mounted) return;
+    setState(() {
+      _promptController.text = artwork.prompt;
+      _style = artwork.style;
+      _tab = 0;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _openGenerating(_makeArtwork(artwork.prompt, artwork.style));
+    });
+  }
+
+  void _deleteArtwork(Artwork artwork) {
+    ArtworkStore.remove(artwork);
+    Navigator.popUntil(context, (route) => route.isFirst);
+  }
+
+  void _improvePrompt() {
+    final original = _promptController.text.trim();
+    if (original.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Write your idea before improving it.')),
+      );
+      return;
+    }
+    final styleDetail = switch (_style) {
+      'Anime' => 'expressive anime illustration, clean line art',
+      'Watercolor' => 'soft watercolor washes, delicate paper texture',
+      '3D' => 'polished 3D render, dimensional lighting',
+      _ => 'realistic details, natural lighting',
+    };
+    final improved =
+        '$original, thoughtfully composed scene, $styleDetail, warm mood';
+    // TODO: Replace this local prompt rule with the future prompt-improvement API.
+    _promptController.value = TextEditingValue(
+      text: improved,
+      selection: TextSelection.collapsed(offset: improved.length),
+    );
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Improved prompt added. Review and edit it below.'),
+      ),
+    );
+  }
+
+  void _toggleTheme() {
+    appThemeMode.value = appThemeMode.value == ThemeMode.dark
+        ? ThemeMode.light
+        : ThemeMode.dark;
   }
 
   @override
-  void dispose() { prompt.dispose(); super.dispose(); }
-
-  @override
   Widget build(BuildContext context) => Scaffold(
-        body: SafeArea(child: IndexedStack(index: tab, children: [createPage(), explorePage(), libraryPage(), profilePage()])),
-        bottomNavigationBar: NavigationBar(
-          selectedIndex: tab,
-          onDestinationSelected: (v) => setState(() => tab = v),
-          backgroundColor: Theme.of(context).colorScheme.surface,
-          indicatorColor: const Color(0xFFE8EDFF),
-          destinations: const [
-            NavigationDestination(icon: Icon(Icons.add_circle_outline), selectedIcon: Icon(Icons.add_circle), label: 'Create'),
-            NavigationDestination(icon: Icon(Icons.explore_outlined), selectedIcon: Icon(Icons.explore), label: 'Explore'),
-            NavigationDestination(icon: Icon(Icons.grid_view_outlined), selectedIcon: Icon(Icons.grid_view), label: 'Library'),
-            NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: 'Profile'),
-          ],
+    body: SafeArea(
+      child: IndexedStack(
+        index: _tab,
+        children: [
+          _createPage(),
+          _explorePage(),
+          _libraryPage(),
+          _profilePage(),
+        ],
+      ),
+    ),
+    bottomNavigationBar: NavigationBar(
+      selectedIndex: _tab,
+      onDestinationSelected: (index) => setState(() => _tab = index),
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      indicatorColor: Theme.of(context).colorScheme.secondaryContainer,
+      destinations: const [
+        NavigationDestination(
+          icon: Icon(Icons.add_circle_outline),
+          selectedIcon: Icon(Icons.add_circle),
+          label: 'Create',
         ),
-      );
-
-  Widget createPage() => ListView(padding: const EdgeInsets.fromLTRB(22, 20, 22, 24), children: [
-    Row(children: [const Icon(Icons.auto_awesome, color: blue), const SizedBox(width: 8), Text('Imagine AI', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: Theme.of(context).colorScheme.onSurface)), const Spacer(), CircleAvatar(radius: 19, backgroundColor: const Color(0xFFFFE66D), child: Text('AC', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)))]),
-    const SizedBox(height: 25), Text('What do you want\nto see?', style: TextStyle(fontSize: 31, height: 1.12, fontWeight: FontWeight.w800, color: Theme.of(context).colorScheme.onSurface)),
-    const SizedBox(height: 22), sectionLabel('1', 'Describe your idea'), const SizedBox(height: 10),
-    TextField(controller: prompt, maxLines: 4, decoration: InputDecoration(hintText: 'A fox reading a book in a cozy library', filled: true, fillColor: Theme.of(context).colorScheme.surface, border: OutlineInputBorder(borderRadius: BorderRadius.circular(18), borderSide: const BorderSide(color: Color(0xFFE7E8ED))), enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(18), borderSide: const BorderSide(color: Color(0xFFE7E8ED))), focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(18), borderSide: const BorderSide(color: blue)), contentPadding: const EdgeInsets.all(16))),
-    const SizedBox(height: 10), Align(alignment: Alignment.centerLeft, child: OutlinedButton.icon(onPressed: () => setState(() => enhance = !enhance), icon: Icon(enhance ? Icons.auto_awesome : Icons.auto_awesome_outlined, size: 16), label: Text(enhance ? 'AI enhancement on' : 'Improve with AI'), style: OutlinedButton.styleFrom(foregroundColor: blue, side: const BorderSide(color: Color(0xFFCAD4FF)), shape: const StadiumBorder()))),
-    Text('Add subject, setting, lighting, and mood for more control.', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12)),
-    const SizedBox(height: 24), sectionLabel('2', 'Pick a style'), const SizedBox(height: 12),
-    Wrap(spacing: 9, runSpacing: 9, children: styles.map((s) => ChoiceChip(label: Text(s), selected: style == s, onSelected: (_) => setState(() => style = s), selectedColor: const Color(0xFFE7EDFF), side: BorderSide(color: style == s ? blue : const Color(0xFFE7E8ED)), labelStyle: TextStyle(color: style == s ? blue : Colors.black87, fontWeight: FontWeight.w600))).toList()),
-    const SizedBox(height: 22), Container(padding: const EdgeInsets.all(14), decoration: BoxDecoration(color: const Color(0xFFFFF9DF), borderRadius: BorderRadius.circular(16)), child: Text('Prompt tip  •  “watercolor” creates soft edges; “cinematic lighting” adds dramatic contrast.', style: TextStyle(fontSize: 12, color: Color(0xFF685D32)))),
-    const SizedBox(height: 18), FilledButton.icon(onPressed: busy ? null : generate, icon: const Icon(Icons.auto_awesome), label: Text(busy ? 'Creating your image…' : 'Generate image'), style: FilledButton.styleFrom(backgroundColor: blue, minimumSize: const Size.fromHeight(54), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)))),
-    if (selected != null) ...[const SizedBox(height: 24), Text('Your latest image', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurface)), const SizedBox(height: 10), GestureDetector(onTap: () => showResult(selected!), child: SampleArtwork(seed: selected!.seed)), const SizedBox(height: 8), Text(selected!.prompt, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))],
-  ]);
-
-  Widget explorePage() => ListView(padding: const EdgeInsets.all(22), children: [title('Explore', 'See what people are creating. Tap a card to try its prompt.'), const SizedBox(height: 18), GridView.count(shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), crossAxisCount: 2, crossAxisSpacing: 12, mainAxisSpacing: 12, childAspectRatio: .72, children: List.generate(4, (i) { final names = ['Misty mountain lake', 'Neon city, anime', 'Cozy house by the sea', 'Spring flower bouquet']; final desc = ['Realistic', 'Anime', 'Watercolor', '3D']; return InkWell(onTap: () { prompt.text = names[i]; setState(() { style = desc[i]; tab = 0; }); }, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Expanded(child: SampleArtwork(seed: i, radius: 18)), const SizedBox(height: 6), Text(names[i], style: TextStyle(fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurface)), Text(desc[i], style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant))])); }))]);
-
-  Widget libraryPage() => ListView(padding: const EdgeInsets.all(22), children: [title('Library', 'Every image you make, in one place.'), const SizedBox(height: 18), if (history.isEmpty) emptyState('Your gallery is waiting', 'Create an image and it will appear here.') else GridView.builder(shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, crossAxisSpacing: 12, mainAxisSpacing: 12), itemCount: history.length, itemBuilder: (_, i) => GestureDetector(onTap: () => showResult(history[i]), child: SampleArtwork(seed: history[i].seed)))]);
-
-  Widget profilePage() => ListView(padding: const EdgeInsets.all(22), children: [title('Profile', 'Your creative space.'), const SizedBox(height: 25), const Center(child: CircleAvatar(radius: 42, backgroundColor: Color(0xFFFFE66D), child: Text('AC', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)))), const SizedBox(height: 12), Center(child: Text('Alex Carter', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurface))), Center(child: Text('@alexcarter', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))), Center(child: OutlinedButton(onPressed: editProfile, child: const Text('Edit profile'))), const SizedBox(height: 16), cardRow(Icons.image_outlined, 'My creations', '${history.length} images'), cardRow(Icons.bookmark_outline, 'Saved images', '0'), const SizedBox(height: 14), cardRow(Icons.palette_outlined, 'Appearance', appThemeMode.value.name, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AppearancePage()))), cardRow(Icons.alternate_email, 'Change email', '›', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ChangeEmailPage()))), cardRow(Icons.lock_outline, 'Change password', '›', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ChangePasswordPage()))), cardRow(Icons.help_outline, 'Help and support', '›', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const HelpSupportPage()))), cardRow(Icons.logout, 'Log out', '›', onTap: () => showDialog(context: context, builder: (ctx) => AlertDialog(title: const Text('Log out?'), content: const Text('Your images stay saved in your account.'), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')), FilledButton(onPressed: () { Navigator.pop(ctx); Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const HomeScreen()), (_) => false); }, child: const Text('Log out'))])))]);
-
-  void editProfile() { final name = TextEditingController(text: 'Alex Carter'); final username = TextEditingController(text: '@alexcarter'); showModalBottomSheet(context: context, isScrollControlled: true, builder: (ctx) => Padding(padding: EdgeInsets.fromLTRB(22, 18, 22, MediaQuery.of(ctx).viewInsets.bottom + 20), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Edit profile', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)), const SizedBox(height: 18), TextField(controller: name, decoration: const InputDecoration(labelText: 'Full name', border: OutlineInputBorder())), const SizedBox(height: 12), TextField(controller: username, decoration: const InputDecoration(labelText: 'Username', border: OutlineInputBorder())), const SizedBox(height: 12), const TextField(maxLines: 3, decoration: InputDecoration(labelText: 'Bio', border: OutlineInputBorder())), const SizedBox(height: 16), SizedBox(width: double.infinity, child: FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('Save changes')))]))); }
-  Widget sectionLabel(String n, String text) => Row(children: [CircleAvatar(radius: 11, backgroundColor: const Color(0xFFFFE66D), child: Text(n, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurface))), const SizedBox(width: 8), Text(text, style: TextStyle(fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurface))]);
-  Widget title(String a, String b) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(a, style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: Theme.of(context).colorScheme.onSurface)), Text(b, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))]);
-  Widget emptyState(String a, String b) => Padding(padding: const EdgeInsets.only(top: 80), child: Column(children: [const Icon(Icons.image_outlined, color: blue, size: 52), const SizedBox(height: 10), Text(a, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)), Text(b, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))]));
-  Widget cardRow(IconData icon, String text, String trailing, {VoidCallback? onTap}) => Card(elevation: 0, child: ListTile(onTap: onTap, leading: Icon(icon, color: blue), title: Text(text), trailing: Text(trailing, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))));
-
-
-void showResult(Artwork image) {
-  Navigator.push(
-    context,
-    MaterialPageRoute(
-      builder: (_) => ResultScreen(artwork: image),
+        NavigationDestination(
+          icon: Icon(Icons.explore_outlined),
+          selectedIcon: Icon(Icons.explore),
+          label: 'Explore',
+        ),
+        NavigationDestination(
+          icon: Icon(Icons.grid_view_outlined),
+          selectedIcon: Icon(Icons.grid_view),
+          label: 'Library',
+        ),
+        NavigationDestination(
+          icon: Icon(Icons.person_outline),
+          selectedIcon: Icon(Icons.person),
+          label: 'Profile',
+        ),
+      ],
     ),
   );
-}
-}
 
+  Widget _createPage() => ListView(
+    padding: const EdgeInsets.fromLTRB(22, 20, 22, 28),
+    keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+    children: [
+      Row(
+        children: [
+          const Icon(Icons.auto_awesome, color: _blue),
+          const SizedBox(width: 8),
+          Text(
+            'Imagine AI',
+            style: Theme.of(context).textTheme.titleLarge
+                ?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          const Spacer(),
+          CircleAvatar(
+            radius: 19,
+            backgroundColor: Theme.of(context).colorScheme.tertiaryContainer,
+            child: ValueListenableBuilder<String>(
+              valueListenable: ArtworkStore.userName,
+              builder: (context, name, _) => Text(_initials(name)),
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 25),
+      Text(
+        'What do you want\nto see?',
+        style: Theme.of(context).textTheme.headlineMedium
+            ?.copyWith(fontWeight: FontWeight.w800),
+      ),
+      const SizedBox(height: 22),
+      _sectionLabel('1', 'Describe your idea'),
+      const SizedBox(height: 10),
+      TextField(
+        controller: _promptController,
+        maxLines: 4,
+        decoration: const InputDecoration(
+          hintText: 'A fox reading a book in a cozy library',
+          filled: true,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.all(Radius.circular(18)),
+          ),
+          contentPadding: EdgeInsets.all(16),
+        ),
+      ),
+      const SizedBox(height: 8),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: OutlinedButton.icon(
+          onPressed: _improvePrompt,
+          icon: const Icon(Icons.auto_awesome, size: 16),
+          label: const Text('Improve with AI'),
+        ),
+      ),
+      Text(
+        'The improved wording appears in the prompt box so you can edit it.',
+        style: Theme.of(context).textTheme.bodySmall
+            ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+      ),
+      const SizedBox(height: 22),
+      _sectionLabel('2', 'Pick a style'),
+      const SizedBox(height: 10),
+      Wrap(
+        spacing: 8,
+        runSpacing: 6,
+        children: _styles
+            .map(
+              (style) => ChoiceChip(
+                label: Text(style),
+                selected: _style == style,
+                onSelected: (_) => setState(() => _style = style),
+                selectedColor: Theme.of(context).colorScheme.secondaryContainer,
+                side: BorderSide(
+                  color: Theme.of(context).colorScheme.outlineVariant,
+                ),
+              ),
+            )
+            .toList(),
+      ),
+      const SizedBox(height: 18),
+      Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.tertiaryContainer,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Text(
+          'Prompt tip • Add subject, setting, lighting and mood. Style words like “watercolor” change the image finish.',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: Theme.of(context).colorScheme.onTertiaryContainer,
+          ),
+        ),
+      ),
+      const SizedBox(height: 18),
+      FilledButton.icon(
+        onPressed: _isGenerating ? null : _generate,
+        icon: const Icon(Icons.auto_awesome),
+        label: const Text('Generate image'),
+        style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
+      ),
+      ValueListenableBuilder<List<Artwork>>(
+        valueListenable: ArtworkStore.history,
+        builder: (context, history, _) {
+          if (history.isEmpty) return const SizedBox.shrink();
+          final latest = history.first;
+          return Padding(
+            padding: const EdgeInsets.only(top: 24),
+            child: InkWell(
+              onTap: () => _openResult(latest),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Your latest image',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 10),
+                  SampleArtwork(seed: latest.seed),
+                  const SizedBox(height: 8),
+                  Text(
+                    latest.prompt,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    ],
+  );
 
+  Widget _explorePage() => ListView(
+    padding: const EdgeInsets.all(22),
+    children: [
+      _pageTitle('Explore', 'Try a sample idea and style.'),
+      const SizedBox(height: 18),
+      GridView.count(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        crossAxisCount: 2,
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 12,
+        childAspectRatio: .72,
+        children: List.generate(4, (index) {
+          const ideas = [
+            'Misty mountain lake',
+            'Neon city at night',
+            'Cozy house by the sea',
+            'Spring flower bouquet',
+          ];
+          return InkWell(
+            onTap: () => setState(() {
+              _promptController.text = ideas[index];
+              _style = _styles[index];
+              _tab = 0;
+            }),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: SampleArtwork(seed: index, radius: 18)),
+                const SizedBox(height: 6),
+                Text(
+                  ideas[index],
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                Text(
+                  _styles[index],
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }),
+      ),
+    ],
+  );
+
+  Widget _libraryPage() => ValueListenableBuilder<List<Artwork>>(
+    valueListenable: _showSaved ? ArtworkStore.saved : ArtworkStore.history,
+    builder: (context, artworks, _) => ListView(
+      padding: const EdgeInsets.all(22),
+      children: [
+        _pageTitle('Library', 'Your images, all in one place.'),
+        const SizedBox(height: 14),
+        SegmentedButton<bool>(
+          segments: const [
+            ButtonSegment(value: false, label: Text('All')),
+            ButtonSegment(value: true, label: Text('Saved')),
+          ],
+          selected: {_showSaved},
+          onSelectionChanged: (value) =>
+              setState(() => _showSaved = value.first),
+        ),
+        const SizedBox(height: 16),
+        if (artworks.isEmpty)
+          _emptyState(
+            _showSaved ? 'No saved images yet' : 'Your gallery is waiting',
+            _showSaved
+                ? 'Save an image from its result page.'
+                : 'Create an image and it will appear here.',
+          )
+        else
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 12,
+            ),
+            itemCount: artworks.length,
+            itemBuilder: (context, index) => InkWell(
+              onTap: () => _openResult(artworks[index]),
+              child: SampleArtwork(seed: artworks[index].seed),
+            ),
+          ),
+      ],
+    ),
+  );
+
+  Widget _profilePage() => ListView(
+    padding: const EdgeInsets.all(22),
+    children: [
+      Row(
+        children: [
+          Text(
+            'Profile',
+            style: Theme.of(context).textTheme.headlineSmall
+                ?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          const Spacer(),
+          IconButton(
+            tooltip: 'Toggle light and dark mode',
+            onPressed: _toggleTheme,
+            icon: Icon(
+              appThemeMode.value == ThemeMode.dark
+                  ? Icons.light_mode
+                  : Icons.dark_mode_outlined,
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 20),
+      Center(
+        child: CircleAvatar(
+          radius: 42,
+          backgroundColor: Theme.of(context).colorScheme.tertiaryContainer,
+          child: ValueListenableBuilder<String>(
+            valueListenable: ArtworkStore.userName,
+            builder: (context, name, _) => Text(
+              _initials(name),
+              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ),
+      ),
+      const SizedBox(height: 12),
+      ValueListenableBuilder<String>(
+        valueListenable: ArtworkStore.userName,
+        builder: (context, name, _) => Center(
+          child: Text(
+            name,
+            style: Theme.of(context).textTheme.titleLarge
+                ?.copyWith(fontWeight: FontWeight.bold),
+          ),
+        ),
+      ),
+      ValueListenableBuilder<String>(
+        valueListenable: ArtworkStore.username,
+        builder: (context, username, _) => Center(
+          child: Text(
+            username,
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+      ),
+      Center(
+        child: OutlinedButton(
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const EditProfilePage()),
+          ),
+          child: const Text('Edit profile'),
+        ),
+      ),
+      const SizedBox(height: 12),
+      ValueListenableBuilder<List<Artwork>>(
+        valueListenable: ArtworkStore.history,
+        builder: (context, history, _) => _profileRow(
+          Icons.image_outlined,
+          'My creations',
+          '${history.length}',
+          () => setState(() {
+            _tab = 2;
+            _showSaved = false;
+          }),
+        ),
+      ),
+      ValueListenableBuilder<List<Artwork>>(
+        valueListenable: ArtworkStore.saved,
+        builder: (context, saved, _) => _profileRow(
+          Icons.bookmark_outline,
+          'Saved images',
+          '${saved.length}',
+          () => setState(() {
+            _tab = 2;
+            _showSaved = true;
+          }),
+        ),
+      ),
+      const SizedBox(height: 12),
+      _profileRow(
+        Icons.palette_outlined,
+        'Appearance',
+        '›',
+        () => _push(const AppearancePage()),
+      ),
+      _profileRow(
+        Icons.alternate_email,
+        'Change email',
+        '›',
+        () => _push(const ChangeEmailPage()),
+      ),
+      _profileRow(
+        Icons.lock_outline,
+        'Change password',
+        '›',
+        () => _push(const ChangePasswordPage()),
+      ),
+      _profileRow(
+        Icons.help_outline,
+        'Help and support',
+        '›',
+        () => _push(const HelpSupportPage()),
+      ),
+      _profileRow(Icons.logout, 'Log out', '›', _logOut),
+    ],
+  );
+
+  void _push(Widget page) =>
+      Navigator.push(context, MaterialPageRoute(builder: (_) => page));
+
+  void _logOut() {
+    ArtworkStore.reset();
+    widget.onLogout?.call(context);
+  }
+
+  Widget _sectionLabel(String number, String label) => Row(
+    children: [
+      CircleAvatar(
+        radius: 11,
+        backgroundColor: Theme.of(context).colorScheme.tertiaryContainer,
+        child: Text(number, style: Theme.of(context).textTheme.labelSmall),
+      ),
+      const SizedBox(width: 8),
+      Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
+    ],
+  );
+
+  Widget _pageTitle(String title, String subtitle) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        title,
+        style: Theme.of(context).textTheme.headlineSmall
+            ?.copyWith(fontWeight: FontWeight.w800),
+      ),
+      Text(
+        subtitle,
+        style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+      ),
+    ],
+  );
+
+  Widget _emptyState(String title, String subtitle) => Padding(
+    padding: const EdgeInsets.only(top: 70),
+    child: Column(
+      children: [
+        Icon(
+          Icons.image_outlined,
+          color: Theme.of(context).colorScheme.primary,
+          size: 52,
+        ),
+        const SizedBox(height: 10),
+        Text(title, style: Theme.of(context).textTheme.titleMedium),
+        Text(
+          subtitle,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _profileRow(
+    IconData icon,
+    String title,
+    String trailing,
+    VoidCallback onTap,
+  ) => Card(
+    child: ListTile(
+      onTap: onTap,
+      leading: Icon(icon, color: Theme.of(context).colorScheme.primary),
+      title: Text(title),
+      trailing: Text(
+        trailing,
+        style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+      ),
+    ),
+  );
+
+  String _initials(String name) {
+    final parts = name
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((part) => part.isNotEmpty)
+        .toList();
+    if (parts.isEmpty) return 'AI';
+    return parts.take(2).map((part) => part[0].toUpperCase()).join();
+  }
+}
